@@ -5,7 +5,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - RABBITMQ_URL=amqp://ADMIN:ADMIN@rabbitmq:5672
       - RABBITMQ_QUEUE=orders_queue
       - RABBITMQ_DLQ=orders_dlq
       - DB_URL=postgres://user:password@postgres:5432/mydb
@@ -18,6 +18,9 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=ADMIN
+      - RABBITMQ_DEFAULT_PASS=ADMIN
 
   postgres:
     image: postgres:15
