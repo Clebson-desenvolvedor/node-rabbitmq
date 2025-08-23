@@ -5,9 +5,30 @@ import processEvent from "../../../src/modules/events/eventService";
 import startConsumer from "../../../src/modules/events/consumer";
 
 jest.mock("amqplib");
-
 jest.mock("../../../src/modules/events/eventService");
-jest.mock("../../../src/modules/events/logger");
+jest.mock("../../../src/modules/events/logger", () => ({
+    __esModule: true,
+    default: {
+        warn: jest.fn(),
+        error: jest.fn(),
+        info: jest.fn(),
+    },
+}));
+
+jest.mock("../../../src/config/config", () => ({
+    __esModule: true,
+    default: {
+        retry: {
+            maxAttempts: 10,
+            delay: 10,
+        },
+        rabbitmq: {
+            dlq: "orders_dlq",
+            queue: "orders_queue",
+            url: "amqp://ADMIN:ADMIN@rabbitmq:5672",
+        },
+    },
+}));
 
 describe("startConsumer", () => {
     const mockChannel = {
@@ -21,6 +42,7 @@ describe("startConsumer", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        (amqp.connect as jest.Mock).mockReset();
         (amqp.connect as jest.Mock).mockResolvedValue(mockConnection);
     });
 
@@ -33,26 +55,30 @@ describe("startConsumer", () => {
         expect(mockChannel.consume).toHaveBeenCalled();
     });
 
+
     it("deve tentar reconectar em caso de erro", async () => {
         (amqp.connect as jest.Mock)
-            .mockRejectedValueOnce(new Error("Falha"))
-            .mockResolvedValueOnce(mockConnection);
+            .mockImplementationOnce(() => Promise.reject(new Error("Falha")))
+            .mockImplementationOnce(() => Promise.resolve(mockConnection));
 
         await startConsumer();
 
+        expect(logger.error).not.toHaveBeenCalled();
         expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("Tentativa 1"));
         expect(amqp.connect).toHaveBeenCalledTimes(2);
     }, 10000);
 
+
     it("deve lançar erro se não conseguir conectar ao RabbitMQ após múltiplas tentativas", async () => {
-        (amqp.connect as jest.Mock).mockRejectedValue(new Error("Falha de conexão"));
+        (amqp.connect as jest.Mock).mockRejectedValue(new Error("qualquer erro"));
 
         await expect(startConsumer()).rejects.toThrow(
-            "Não foi possível conectar ao RabbitMQ após múltiplas tentativas."
+            new Error("Não foi possível conectar ao RabbitMQ após múltiplas tentativas.")
         );
 
         expect(amqp.connect).toHaveBeenCalledTimes(config.retry.maxAttempts);
     }, 80000);
+
 
     it("deve processar a mensagem recebida da fila", async () => {
         const fakeMsg = { content: Buffer.from(JSON.stringify({ id: "123", type: "ORDER_CREATED" })) };
@@ -80,10 +106,10 @@ describe("startConsumer", () => {
         await startConsumer();
         await consumeCallback(fakeMsg);
 
-        expect(processEvent).toHaveBeenCalledTimes(config.retry.maxAttempts);
+        expect(processEvent).toHaveBeenCalledTimes(10);
 
         expect(mockChannel.sendToQueue).toHaveBeenCalledWith(
-            config.rabbitmq.dlq,
+            "orders_dlq",
             Buffer.from(JSON.stringify({ id: "123", type: "ORDER_CREATED" }))
         );
 
@@ -91,4 +117,16 @@ describe("startConsumer", () => {
 
         expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining(`Mensagem enviada para DLQ`));
     }, 70000);
+
+    it("deve logar erro e lançar exceção se falhar ao iniciar o consumidor", async () => {
+        (amqp.connect as jest.Mock).mockResolvedValue(mockConnection);
+
+        mockConnection.createChannel.mockRejectedValue(new Error("Erro ao criar canal"));
+
+        await expect(startConsumer()).rejects.toThrow("Erro ao criar canal");
+
+        expect(logger.error).toHaveBeenCalledWith(
+            expect.stringContaining("Erro ao iniciar consumidor: Erro ao criar canal")
+        );
+    });
 });
