@@ -42,5 +42,3 @@ export default async function startConsumer(): Promise<void> {
         }
     });
 }
-
-module.exports = { startConsumer };

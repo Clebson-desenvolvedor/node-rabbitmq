@@ -20,10 +20,13 @@ services:
       - "15672:15672"
 
   postgres:
-    image: postgres:13
+    image: postgres:15
+    container_name: postgres_db
+    restart: always
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: mydb
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: rootpass
     ports:
       - "5432:5432"
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
